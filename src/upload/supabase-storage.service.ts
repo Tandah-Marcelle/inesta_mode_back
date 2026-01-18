@@ -15,9 +15,10 @@ export interface UploadedFile {
 
 @Injectable()
 export class SupabaseStorageService {
-  private supabase: SupabaseClient;
+  private supabase: SupabaseClient | null = null;
   private bucketName: string;
   private readonly maxFileSize: number;
+  private readonly isConfigured: boolean;
   private readonly allowedMimeTypes = [
     'image/jpeg',
     'image/jpg',
@@ -33,13 +34,24 @@ export class SupabaseStorageService {
     this.maxFileSize = this.configService.get<number>('MAX_FILE_SIZE', 5242880); // 5MB
 
     if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Supabase configuration is missing');
+      console.warn('Supabase configuration is missing. File upload functionality will be disabled.');
+      this.isConfigured = false;
+      return;
     }
 
+    this.isConfigured = true;
     this.supabase = createClient(supabaseUrl, supabaseKey);
   }
 
+  private checkConfiguration(): void {
+    if (!this.isConfigured || !this.supabase) {
+      throw new BadRequestException('File upload service is not configured. Please configure Supabase settings.');
+    }
+  }
+
   async saveFile(file: Express.Multer.File, folder = 'images'): Promise<UploadedFile> {
+    this.checkConfiguration();
+    
     // Validate file
     this.validateFile(file);
 
@@ -49,7 +61,7 @@ export class SupabaseStorageService {
 
     try {
       // Upload to Supabase Storage
-      const { data, error } = await this.supabase.storage
+      const { data, error } = await this.supabase!.storage
         .from(this.bucketName)
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
@@ -61,7 +73,7 @@ export class SupabaseStorageService {
       }
 
       // Get public URL
-      const { data: publicURLData } = this.supabase.storage
+      const { data: publicURLData } = this.supabase!.storage
         .from(this.bucketName)
         .getPublicUrl(data.path);
 
@@ -87,6 +99,11 @@ export class SupabaseStorageService {
   }
 
   async deleteFile(filePath: string): Promise<void> {
+    if (!this.isConfigured || !this.supabase) {
+      console.warn('Supabase not configured, skipping file deletion');
+      return;
+    }
+
     try {
       // Extract the path from URL if it's a full URL
       let path = filePath;
