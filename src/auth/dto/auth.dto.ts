@@ -42,3 +42,8 @@ export class AuthResponseDto {
     role: string;
   } | null;
 }
+
+export class EnhancedAuthResponseDto extends AuthResponseDto {
+  sessionToken?: string;
+  requiresMfa?: boolean;
+}

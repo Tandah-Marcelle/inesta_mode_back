@@ -8,8 +8,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
-import { User, UserRole } from '../entities/user.entity';
-import { LoginDto, RegisterDto, AuthResponseDto } from './dto/auth.dto';
+import { User, UserRole, ApprovalStatus } from '../entities/user.entity';
+import { Permission, PermissionResource, PermissionAction } from '../entities/permission.entity';
+import { UserPermission } from '../entities/user-permission.entity';
+import { LoginDto, RegisterDto, AuthResponseDto, EnhancedAuthResponseDto } from './dto/auth.dto';
 import { JwtPayload } from './jwt.strategy';
 import { TokenBlacklistService } from './token-blacklist.service';
 import { SecurityService, SecurityContext } from './security.service';
@@ -18,16 +20,15 @@ export interface MfaLoginDto extends LoginDto {
   mfaToken?: string;
 }
 
-export interface EnhancedAuthResponseDto extends AuthResponseDto {
-  requiresMfa?: boolean;
-  sessionToken?: string;
-}
-
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Permission)
+    private readonly permissionRepository: Repository<Permission>,
+    @InjectRepository(UserPermission)
+    private readonly userPermissionRepository: Repository<UserPermission>,
     private readonly jwtService: JwtService,
     private readonly tokenBlacklistService: TokenBlacklistService,
     private readonly securityService: SecurityService,
@@ -106,6 +107,16 @@ export class AuthService {
     if (!user) {
       await this.securityService.recordFailedLogin(email, context);
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Check if admin account is pending approval
+    if ((user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) && user.isPendingApproval) {
+      throw new UnauthorizedException('Your admin account is pending approval. Please wait for a super administrator to approve your request.');
+    }
+
+    // Check if admin account was rejected
+    if ((user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) && user.approvalStatus === ApprovalStatus.REJECTED) {
+      throw new UnauthorizedException('Your admin account request was rejected. Please contact a super administrator.');
     }
 
     // Check password
@@ -290,40 +301,259 @@ export class AuthService {
   }
 
   // Admin Methods
-  async createSecureAdmin(): Promise<{ message: string; tempPassword?: string }> {
-    const adminEmail = 'admin@inestamode.com';
+  async createSecureAdmin(createAdminDto: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    requestReason?: string;
+  }): Promise<{ message: string; email: string; requiresApproval: boolean }> {
+    const { firstName, lastName, email, password, requestReason } = createAdminDto;
+    
+    // Validate password strength
+    this.validatePasswordStrength(password);
     
     // Check if admin already exists
     const existingAdmin = await this.userRepository.findOne({
-      where: { email: adminEmail },
+      where: { email },
     });
 
     if (existingAdmin) {
-      return { message: 'Admin user already exists' };
+      throw new ConflictException('User with this email already exists');
     }
 
-    // Generate secure temporary password
-    const tempPassword = this.generateSecurePassword();
-    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+    // Hash the provided password
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create admin user
+    // Create admin user with pending approval status
     const admin = this.userRepository.create({
-      firstName: 'Super',
-      lastName: 'Admin',
-      email: adminEmail,
+      firstName,
+      lastName,
+      email,
       password: hashedPassword,
-      role: UserRole.SUPER_ADMIN,
-      isActive: true,
+      role: UserRole.ADMIN, // Will be admin once approved
+      isActive: false, // Inactive until approved
       isEmailVerified: true,
-      requirePasswordChange: true, // Force password change on first login
+      requirePasswordChange: false,
+      approvalStatus: ApprovalStatus.PENDING,
+      requestedAt: new Date(),
+      requestReason: requestReason || 'Admin access request',
     });
 
     await this.userRepository.save(admin);
 
+    // TODO: Send email notification to existing super admins
+    // await this.notifySuperAdminsOfPendingRequest(admin);
+
     return {
-      message: 'Secure admin user created. Please change the password on first login.',
-      tempPassword, // Only return this once during setup
+      message: 'Admin request submitted successfully. Your account will be activated once approved by a super administrator.',
+      email,
+      requiresApproval: true,
     };
+  }
+
+  async getPendingAdminRequests(): Promise<User[]> {
+    return this.userRepository.find({
+      where: {
+        role: UserRole.ADMIN,
+        approvalStatus: ApprovalStatus.PENDING,
+      },
+      order: { requestedAt: 'DESC' },
+    });
+  }
+
+  async approveAdminRequest(
+    requestId: string,
+    approverId: string,
+    comments?: string
+  ): Promise<{ message: string }> {
+    const adminRequest = await this.userRepository.findOne({
+      where: {
+        id: requestId,
+        approvalStatus: ApprovalStatus.PENDING,
+      },
+    });
+
+    if (!adminRequest) {
+      throw new BadRequestException('Admin request not found or already processed');
+    }
+
+    // Update the admin request
+    adminRequest.approvalStatus = ApprovalStatus.APPROVED;
+    adminRequest.approvedBy = approverId;
+    adminRequest.approvedAt = new Date();
+    adminRequest.approvalComments = comments || null;
+    adminRequest.isActive = true; // Activate the account
+
+    await this.userRepository.save(adminRequest);
+
+    // Assign basic admin permissions
+    await this.assignBasicAdminPermissions(adminRequest.id);
+
+    // TODO: Send email notification to the approved admin
+    // await this.emailService.sendApprovalNotification(adminRequest.email, true, comments);
+
+    return { message: 'Admin request approved successfully' };
+  }
+
+  private async assignBasicAdminPermissions(userId: string): Promise<void> {
+    // First, ensure permissions exist by seeding them if needed
+    await this.ensurePermissionsExist();
+
+    // Define basic admin permissions
+    const basicAdminPermissions = [
+      // Dashboard access
+      { resource: PermissionResource.DASHBOARD, action: PermissionAction.VIEW },
+      
+      // Products management
+      { resource: PermissionResource.PRODUCTS, action: PermissionAction.VIEW },
+      { resource: PermissionResource.PRODUCTS, action: PermissionAction.CREATE },
+      { resource: PermissionResource.PRODUCTS, action: PermissionAction.UPDATE },
+      { resource: PermissionResource.PRODUCTS, action: PermissionAction.DELETE },
+      
+      // Categories management
+      { resource: PermissionResource.CATEGORIES, action: PermissionAction.VIEW },
+      { resource: PermissionResource.CATEGORIES, action: PermissionAction.CREATE },
+      { resource: PermissionResource.CATEGORIES, action: PermissionAction.UPDATE },
+      { resource: PermissionResource.CATEGORIES, action: PermissionAction.DELETE },
+      
+      // Users management - full access for admins
+      { resource: PermissionResource.USERS, action: PermissionAction.VIEW },
+      { resource: PermissionResource.USERS, action: PermissionAction.CREATE },
+      { resource: PermissionResource.USERS, action: PermissionAction.UPDATE },
+      { resource: PermissionResource.USERS, action: PermissionAction.DELETE },
+      
+      // Orders management
+      { resource: PermissionResource.ORDERS, action: PermissionAction.VIEW },
+      { resource: PermissionResource.ORDERS, action: PermissionAction.UPDATE },
+      
+      // Permissions management
+      { resource: PermissionResource.PERMISSIONS, action: PermissionAction.VIEW },
+      { resource: PermissionResource.PERMISSIONS, action: PermissionAction.UPDATE },
+      
+      // Content management
+      { resource: PermissionResource.SETTINGS, action: PermissionAction.VIEW },
+      
+      // Contact messages
+      { resource: PermissionResource.CONTACT_MESSAGES, action: PermissionAction.VIEW },
+      { resource: PermissionResource.CONTACT_MESSAGES, action: PermissionAction.UPDATE },
+    ];
+
+    // Find and assign permissions
+    for (const permissionData of basicAdminPermissions) {
+      const permission = await this.permissionRepository.findOne({
+        where: {
+          resource: permissionData.resource,
+          action: permissionData.action,
+        },
+      });
+
+      if (permission) {
+        // Check if permission already exists for this user
+        const existingUserPermission = await this.userPermissionRepository.findOne({
+          where: {
+            userId: userId,
+            permissionId: permission.id,
+          },
+        });
+
+        if (!existingUserPermission) {
+          // Create new user permission
+          const userPermission = this.userPermissionRepository.create({
+            userId: userId,
+            permissionId: permission.id,
+            isGranted: true,
+          });
+
+          await this.userPermissionRepository.save(userPermission);
+        }
+      }
+    }
+  }
+
+  private async ensurePermissionsExist(): Promise<void> {
+    // Check if permissions exist
+    const permissionCount = await this.permissionRepository.count();
+    
+    if (permissionCount === 0) {
+      // Seed basic permissions
+      const basicPermissions = [
+        // Dashboard
+        { resource: PermissionResource.DASHBOARD, action: PermissionAction.VIEW, name: 'Voir le tableau de bord', description: 'Accès au tableau de bord principal' },
+        
+        // Products
+        { resource: PermissionResource.PRODUCTS, action: PermissionAction.VIEW, name: 'Voir les produits', description: 'Consulter la liste des produits' },
+        { resource: PermissionResource.PRODUCTS, action: PermissionAction.CREATE, name: 'Créer des produits', description: 'Ajouter de nouveaux produits' },
+        { resource: PermissionResource.PRODUCTS, action: PermissionAction.UPDATE, name: 'Modifier les produits', description: 'Modifier les produits existants' },
+        { resource: PermissionResource.PRODUCTS, action: PermissionAction.DELETE, name: 'Supprimer les produits', description: 'Supprimer des produits' },
+        
+        // Categories
+        { resource: PermissionResource.CATEGORIES, action: PermissionAction.VIEW, name: 'Voir les catégories', description: 'Consulter la liste des catégories' },
+        { resource: PermissionResource.CATEGORIES, action: PermissionAction.CREATE, name: 'Créer des catégories', description: 'Ajouter de nouvelles catégories' },
+        { resource: PermissionResource.CATEGORIES, action: PermissionAction.UPDATE, name: 'Modifier les catégories', description: 'Modifier les catégories existantes' },
+        { resource: PermissionResource.CATEGORIES, action: PermissionAction.DELETE, name: 'Supprimer les catégories', description: 'Supprimer des catégories' },
+        
+        // Users
+        { resource: PermissionResource.USERS, action: PermissionAction.VIEW, name: 'Voir les utilisateurs', description: 'Consulter la liste des utilisateurs' },
+        { resource: PermissionResource.USERS, action: PermissionAction.CREATE, name: 'Créer des utilisateurs', description: 'Ajouter de nouveaux utilisateurs' },
+        { resource: PermissionResource.USERS, action: PermissionAction.UPDATE, name: 'Modifier les utilisateurs', description: 'Modifier les utilisateurs existants' },
+        { resource: PermissionResource.USERS, action: PermissionAction.DELETE, name: 'Supprimer les utilisateurs', description: 'Supprimer des utilisateurs' },
+        
+        // Orders
+        { resource: PermissionResource.ORDERS, action: PermissionAction.VIEW, name: 'Voir les commandes', description: 'Consulter la liste des commandes' },
+        { resource: PermissionResource.ORDERS, action: PermissionAction.UPDATE, name: 'Modifier les commandes', description: 'Modifier le statut des commandes' },
+        
+        // Settings
+        { resource: PermissionResource.SETTINGS, action: PermissionAction.VIEW, name: 'Voir les paramètres', description: 'Accès aux paramètres système' },
+        { resource: PermissionResource.SETTINGS, action: PermissionAction.UPDATE, name: 'Modifier les paramètres', description: 'Modifier les paramètres système' },
+        
+        // Contact Messages
+        { resource: PermissionResource.CONTACT_MESSAGES, action: PermissionAction.VIEW, name: 'Voir les messages', description: 'Consulter les messages de contact' },
+        { resource: PermissionResource.CONTACT_MESSAGES, action: PermissionAction.UPDATE, name: 'Traiter les messages', description: 'Marquer les messages comme lus/traités' },
+        { resource: PermissionResource.CONTACT_MESSAGES, action: PermissionAction.DELETE, name: 'Supprimer les messages', description: 'Supprimer des messages de contact' },
+      ];
+
+      for (const permissionData of basicPermissions) {
+        const existing = await this.permissionRepository.findOne({
+          where: { resource: permissionData.resource, action: permissionData.action },
+        });
+
+        if (!existing) {
+          const permission = this.permissionRepository.create(permissionData);
+          await this.permissionRepository.save(permission);
+        }
+      }
+    }
+  }
+
+  async rejectAdminRequest(
+    requestId: string,
+    approverId: string,
+    comments?: string
+  ): Promise<{ message: string }> {
+    const adminRequest = await this.userRepository.findOne({
+      where: {
+        id: requestId,
+        approvalStatus: ApprovalStatus.PENDING,
+      },
+    });
+
+    if (!adminRequest) {
+      throw new BadRequestException('Admin request not found or already processed');
+    }
+
+    // Update the admin request
+    adminRequest.approvalStatus = ApprovalStatus.REJECTED;
+    adminRequest.approvedBy = approverId;
+    adminRequest.approvedAt = new Date();
+    adminRequest.approvalComments = comments || null;
+
+    await this.userRepository.save(adminRequest);
+
+    // TODO: Send email notification to the rejected admin
+    // await this.emailService.sendApprovalNotification(adminRequest.email, false, comments);
+
+    return { message: 'Admin request rejected successfully' };
   }
 
   // Utility Methods

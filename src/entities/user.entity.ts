@@ -18,6 +18,12 @@ export enum UserRole {
   UTILISATEUR = 'utilisateur',
 }
 
+export enum ApprovalStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -111,6 +117,29 @@ export class User {
   @Column({ type: 'text', nullable: true })
   lastLoginUserAgent: string | null;
 
+  // Admin approval fields
+  @Column({
+    type: 'enum',
+    enum: ApprovalStatus,
+    default: ApprovalStatus.APPROVED, // Regular users are auto-approved
+  })
+  approvalStatus: ApprovalStatus;
+
+  @Column({ type: 'timestamp', nullable: true })
+  requestedAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  approvedBy: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  approvedAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  approvalComments: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  requestReason: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -134,7 +163,7 @@ export class User {
 
   // Security methods
   get isLocked(): boolean {
-    return this.lockedUntil && this.lockedUntil > new Date();
+    return !!(this.lockedUntil && this.lockedUntil > new Date());
   }
 
   get isPasswordResetValid(): boolean {
@@ -143,5 +172,13 @@ export class User {
 
   get isEmailVerificationValid(): boolean {
     return !!(this.emailVerificationToken && this.emailVerificationExpires && this.emailVerificationExpires > new Date());
+  }
+
+  get isPendingApproval(): boolean {
+    return this.approvalStatus === ApprovalStatus.PENDING;
+  }
+
+  get isApproved(): boolean {
+    return this.approvalStatus === ApprovalStatus.APPROVED;
   }
 }

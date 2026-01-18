@@ -23,7 +23,7 @@ import { FilterProductsDto } from './dto/filter-products.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions, Permission } from '../auth/decorators/permissions.decorator';
-import { Product } from '../entities/product.entity';
+import { Product, ProductStatus } from '../entities/product.entity';
 
 @Controller('products')
 export class ProductsController {
@@ -37,6 +37,12 @@ export class ProductsController {
   }
 
   @Get()
+  async findAllPublic(@Query() filterDto: FilterProductsDto): Promise<PaginatedProducts> {
+    // Only return published products for public access
+    return this.productsService.findAll({ ...filterDto, status: ProductStatus.PUBLISHED });
+  }
+
+  @Get('admin')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(Permission('products', 'view'))
   async findAll(@Query() filterDto: FilterProductsDto): Promise<PaginatedProducts> {
@@ -59,9 +65,14 @@ export class ProductsController {
   }
 
   @Get(':id')
+  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<Product> {
+    return this.productsService.findOne(id);
+  }
+
+  @Get('admin/:id')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(Permission('products', 'view'))
-  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<Product> {
+  async findOneAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<Product> {
     return this.productsService.findOne(id);
   }
 

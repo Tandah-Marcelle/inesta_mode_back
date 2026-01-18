@@ -43,23 +43,40 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    // Admin role also has broad permissions - check if user has explicit permissions
+    // Regular admin has broad permissions by default - only check for sensitive operations
     if (user.role === 'admin') {
-      console.log('PermissionsGuard: Checking admin permissions...');
-      // For admin, check each required permission
-      for (const permission of requiredPermissions) {
-        const hasPermission = await this.checkUserPermission(
-          user.id,
-          permission.resource,
-          permission.action,
-        );
-        console.log(`PermissionsGuard: Admin permission check for ${permission.resource}:${permission.action} = ${hasPermission}`);
-        
-        if (!hasPermission) {
-          console.log(`PermissionsGuard: Admin access denied - missing permission ${permission.resource}:${permission.action}`);
-          return false;
+      console.log('PermissionsGuard: Admin user detected - granting broad access');
+      
+      // Admins have access to most operations by default
+      // Only restrict very sensitive operations that require explicit permissions
+      const restrictedOperations = [
+        'permissions:update', // Managing permissions
+        'users:delete',       // Deleting users
+        'settings:update'     // System settings
+      ];
+      
+      const hasRestrictedOperation = requiredPermissions.some(permission => 
+        restrictedOperations.includes(`${permission.resource}:${permission.action}`)
+      );
+      
+      if (hasRestrictedOperation) {
+        console.log('PermissionsGuard: Admin requesting restricted operation, checking explicit permissions...');
+        // For restricted operations, check explicit permissions
+        for (const permission of requiredPermissions) {
+          const hasPermission = await this.checkUserPermission(
+            user.id,
+            permission.resource,
+            permission.action,
+          );
+          console.log(`PermissionsGuard: Admin permission check for ${permission.resource}:${permission.action} = ${hasPermission}`);
+          
+          if (!hasPermission) {
+            console.log(`PermissionsGuard: Admin access denied - missing permission ${permission.resource}:${permission.action}`);
+            return false;
+          }
         }
       }
+      
       console.log('PermissionsGuard: Admin access granted');
       return true;
     }

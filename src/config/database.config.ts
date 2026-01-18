@@ -5,6 +5,7 @@ export const getDatabaseConfig = (
   configService: ConfigService,
 ): TypeOrmModuleOptions => {
   const password = configService.get<string>('DB_PASSWORD');
+  const isSupabase = configService.get<string>('DB_HOST', '').includes('supabase.com');
   
   return {
     type: 'postgres',
@@ -17,6 +18,11 @@ export const getDatabaseConfig = (
     synchronize: configService.get<string>('NODE_ENV') === 'development',
     logging: configService.get<string>('NODE_ENV') === 'development',
     autoLoadEntities: true,
-    ssl: configService.get<string>('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: isSupabase ? true : (configService.get<string>('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false),
+    extra: isSupabase ? {
+      ssl: {
+        rejectUnauthorized: false,
+      },
+    } : {},
   };
 };

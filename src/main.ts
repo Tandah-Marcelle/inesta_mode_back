@@ -9,18 +9,30 @@ async function bootstrap() {
   // Set global prefix
   app.setGlobalPrefix('api');
   
-  // Enable CORS for frontend
+  // Enable CORS for frontend (add your production URLs)
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3001'],
+    origin: [
+      'http://localhost:5173', 
+      'http://localhost:5174', 
+      'http://localhost:3001',
+      'https://your-frontend-domain.vercel.app', // Replace with your actual frontend URL
+      'https://your-frontend-domain.netlify.app', // Replace with your actual frontend URL
+    ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
   
-  // Seed permissions on startup
-  const dataSource = app.get(DataSource);
-  await seedPermissions(dataSource);
+  // Seed permissions on startup (only in development)
+  if (process.env.NODE_ENV !== 'production') {
+    const dataSource = app.get(DataSource);
+    await seedPermissions(dataSource);
+  }
   
-  await app.listen(process.env.PORT ?? 3000);
+  // Use environment port or default to 3000
+  const port = process.env.PORT || 3000;
+  await app.listen(port, '0.0.0.0');
+  
+  console.log(`🚀 Application is running on port ${port}`);
 }
 bootstrap();
