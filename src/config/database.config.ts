@@ -4,25 +4,41 @@ import { ConfigService } from '@nestjs/config';
 export const getDatabaseConfig = (
   configService: ConfigService,
 ): TypeOrmModuleOptions => {
-  const password = configService.get<string>('DB_PASSWORD');
-  const isSupabase = configService.get<string>('DB_HOST', '').includes('supabase.com');
-  
-  return {
+  const databaseUrl = configService.get<string>('DATABASE_URL');
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+
+  // Base configuration
+  const baseConfig: TypeOrmModuleOptions = {
     type: 'postgres',
-    host: configService.get<string>('DB_HOST', 'localhost'),
-    port: configService.get<number>('DB_PORT', 5432),
-    username: configService.get<string>('DB_USERNAME', 'postgres'),
-    password: password || '', // Use empty string instead of undefined for PostgreSQL
-    database: configService.get<string>('DB_DATABASE', 'inesta_mode'),
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-    synchronize: configService.get<string>('NODE_ENV') === 'development',
-    logging: configService.get<string>('NODE_ENV') === 'development',
+    synchronize: true, // Keep true for initial dev/deployment, change to false later
+    logging: !isProduction,
     autoLoadEntities: true,
-    ssl: isSupabase ? true : (configService.get<string>('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false),
-    extra: isSupabase ? {
+  };
+
+  // If DATABASE_URL is provided (typical for Railway/Supabase)
+  if (databaseUrl) {
+    return {
+      ...baseConfig,
+      url: databaseUrl,
       ssl: {
         rejectUnauthorized: false,
       },
-    } : {},
+    };
+  }
+
+  // Fallback to individual parameters (local dev or manual config)
+  const password = configService.get<string>('DB_PASSWORD');
+  const host = configService.get<string>('DB_HOST', 'localhost');
+  const isSupabase = host.includes('supabase.com') || host.includes('supabase.co');
+
+  return {
+    ...baseConfig,
+    host,
+    port: configService.get<number>('DB_PORT', 5432),
+    username: configService.get<string>('DB_USERNAME', 'postgres'),
+    password: password || '',
+    database: configService.get<string>('DB_DATABASE', 'inesta_mode'),
+    ssl: isSupabase || isProduction ? { rejectUnauthorized: false } : false,
   };
 };
