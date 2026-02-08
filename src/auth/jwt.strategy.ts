@@ -34,6 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<User> {
+    console.log('JWT Validate Payload:', payload);
     const { sub: userId } = payload;
 
     const user = await this.userRepository.findOne({
@@ -41,9 +42,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
 
     if (!user) {
+      console.error(`JWT Validation Failed: User not found or inactive. ID: ${userId}`);
       throw new UnauthorizedException('User not found or inactive');
     }
 
+    console.log(`JWT Validation Success for user: ${user.email}`);
     return user;
   }
 }
