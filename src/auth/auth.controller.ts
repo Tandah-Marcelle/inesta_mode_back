@@ -12,7 +12,9 @@ import {
   Param,
   Patch,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Request } from 'express';
@@ -38,7 +40,7 @@ export class AuthController {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   private getSecurityContext(req: Request): SecurityContext {
     return {
@@ -51,14 +53,42 @@ export class AuthController {
 
   private parseDevice(userAgent?: string): string | undefined {
     if (!userAgent) return undefined;
-    
+
     if (userAgent.includes('Mobile')) return 'Mobile';
     if (userAgent.includes('Tablet')) return 'Tablet';
     if (userAgent.includes('Windows')) return 'Windows PC';
     if (userAgent.includes('Mac')) return 'Mac';
     if (userAgent.includes('Linux')) return 'Linux PC';
-    
+
     return 'Unknown Device';
+  }
+
+  @Get('debug-user-check')
+  async debugUserCheck(@Query('email') email: string) {
+    if (!email) return { error: 'Email required' };
+
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) {
+      return {
+        exists: false,
+        message: 'No user found with this email at all',
+        dbName: this.userRepository.manager.connection.driver.database
+      };
+    }
+
+    const testPass = 'TemporaryAdmin123!';
+    const isMatch = await bcrypt.compare(testPass, user.password);
+
+    return {
+      exists: true,
+      email: user.email,
+      role: user.role,
+      passwordHashPreview: user.password.substring(0, 10) + '...',
+      passwordLength: user.password.length,
+      doesMatchTempPassword: isMatch,
+      isActive: user.isActive,
+      failedLoginAttempts: user.failedLoginAttempts
+    };
   }
 
   @Post('register')
