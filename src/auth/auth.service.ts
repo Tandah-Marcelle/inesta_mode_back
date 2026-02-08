@@ -123,13 +123,25 @@ export class AuthService {
     }
 
     // Check password
-    console.log(`Debug Login: Email=${email}, PwdLen=${password.length}, HashLen=${user.password.length}, FirstChar=${password.charCodeAt(0)}, LastChar=${password.charCodeAt(password.length - 1)}`);
+    try {
+      console.log(`Debug Login Full DTO:`, JSON.stringify({ email, passwordLength: password ? password.length : 'UNDEFINED' }));
 
-    // Check if the password is "TemporaryAdmin123!" explicitly to see if strictly equals
-    if (password === 'TemporaryAdmin123!') {
-      console.log('Debug Login: Password STRING matches hardcoded value exactly.');
-    } else {
-      console.log('Debug Login: Password STRING does NOT match hardcoded value.');
+      if (!password) {
+        console.error('Debug Login: PASSWORD IS UNDEFINED! DTO Validation might have stripped it.');
+        throw new UnauthorizedException('Invalid credentials (Missing Password)');
+      }
+
+      console.log(`Debug Login: Email=${email}, PwdLen=${password.length}, HashLen=${user.password ? user.password.length : 'NO_HASH'}, FirstChar=${password.charCodeAt(0)}, LastChar=${password.charCodeAt(password.length - 1)}`);
+
+      // Check if the password is "TemporaryAdmin123!" explicitly to see if strictly equals
+      if (password === 'TemporaryAdmin123!') {
+        console.log('Debug Login: Password STRING matches hardcoded value exactly.');
+      } else {
+        console.log('Debug Login: Password STRING does NOT match hardcoded value.');
+      }
+    } catch (e) {
+      console.error('Error in debug logging:', e);
+      if (e instanceof UnauthorizedException) throw e;
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
