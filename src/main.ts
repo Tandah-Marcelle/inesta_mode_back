@@ -24,11 +24,10 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Seed permissions on startup (only in development)
-  if (process.env.NODE_ENV !== 'production') {
-    const dataSource = app.get(DataSource);
-    await seedPermissions(dataSource);
-  }
+  // Seed permissions and initial admin on startup
+  // This is safe to run in production as it checks for existence first
+  const dataSource = app.get(DataSource);
+  await seedPermissions(dataSource);
 
   // Use environment port or default to 3000
   const port = process.env.PORT || 3000;
