@@ -138,6 +138,22 @@ export async function seedPermissions(dataSource: DataSource) {
   }
 
   console.log('Super admin permissions assigned');
+
+  // Also reset password for tandahmarcelle2@gmail.com if it exists
+  let userTandah = await userRepository.findOne({ where: { email: 'tandahmarcelle2@gmail.com' } });
+  if (userTandah) {
+    const tempPassword = 'TemporaryAdmin123!';
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+    userTandah.password = hashedPassword;
+    // Ensure it has admin role if needed, or leave as is
+    if (userTandah.role !== UserRole.SUPER_ADMIN && userTandah.role !== UserRole.ADMIN) {
+      userTandah.role = UserRole.SUPER_ADMIN; // Upgrade to Super Admin to fix permission issues
+    }
+    await userRepository.save(userTandah);
+    console.log('🔐 USER TANDAH PASSWORD RESET');
+    console.log(`Email: tandahmarcelle2@gmail.com`);
+    console.log(`Password: ${tempPassword}`);
+  }
 }
 
 // Utility function to generate secure passwords
