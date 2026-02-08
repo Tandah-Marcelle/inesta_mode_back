@@ -67,28 +67,33 @@ export class AuthController {
   async debugUserCheck(@Query('email') email: string) {
     if (!email) return { error: 'Email required' };
 
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (!user) {
+    try {
+      const user = await this.userRepository.findOne({ where: { email } });
+      if (!user) {
+        return {
+          exists: false,
+          message: 'No user found with this email at all'
+        };
+      }
+
+      const testPass = 'TemporaryAdmin123!';
+      const isMatch = await bcrypt.compare(testPass, user.password);
+
       return {
-        exists: false,
-        message: 'No user found with this email at all',
-        dbName: this.userRepository.manager.connection.driver.database
+        exists: true,
+        email: user.email,
+        role: user.role,
+        passwordHashPreview: user.password ? user.password.substring(0, 10) + '...' : 'NO_PASSWORD',
+        doesMatchTempPassword: isMatch,
+        isActive: user.isActive,
+        failedLoginAttempts: user.failedLoginAttempts
+      };
+    } catch (error) {
+      return {
+        error: 'Debug check failed',
+        details: error.message
       };
     }
-
-    const testPass = 'TemporaryAdmin123!';
-    const isMatch = await bcrypt.compare(testPass, user.password);
-
-    return {
-      exists: true,
-      email: user.email,
-      role: user.role,
-      passwordHashPreview: user.password.substring(0, 10) + '...',
-      passwordLength: user.password.length,
-      doesMatchTempPassword: isMatch,
-      isActive: user.isActive,
-      failedLoginAttempts: user.failedLoginAttempts
-    };
   }
 
   @Post('register')
