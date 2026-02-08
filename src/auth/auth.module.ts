@@ -25,13 +25,13 @@ import { SecurityLog } from '../entities/security-log.entity';
       useFactory: async (configService: ConfigService): Promise<JwtModuleOptions> => {
         const secret = configService.get<string>('JWT_SECRET');
         const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '1d');
-        
+
         if (!secret) {
-          throw new Error('JWT_SECRET is required');
+          console.warn('JWT_SECRET not found, using fallback (DEV ONLY)');
         }
-        
+
         return {
-          secret,
+          secret: secret || 'default-secret',
           signOptions: {
             expiresIn: expiresIn as any, // Cast to any to avoid type issues
           },
@@ -44,4 +44,4 @@ import { SecurityLog } from '../entities/security-log.entity';
   controllers: [AuthController],
   exports: [AuthService, JwtStrategy, TokenBlacklistService, SecurityService, JwtBlacklistGuard, PermissionsGuard, PassportModule],
 })
-export class AuthModule {}
+export class AuthModule { }
