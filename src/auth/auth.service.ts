@@ -123,6 +123,15 @@ export class AuthService {
     }
 
     // Check password
+    console.log(`Debug Login: Email=${email}, PwdLen=${password.length}, HashLen=${user.password.length}, FirstChar=${password.charCodeAt(0)}, LastChar=${password.charCodeAt(password.length - 1)}`);
+
+    // Check if the password is "TemporaryAdmin123!" explicitly to see if strictly equals
+    if (password === 'TemporaryAdmin123!') {
+      console.log('Debug Login: Password STRING matches hardcoded value exactly.');
+    } else {
+      console.log('Debug Login: Password STRING does NOT match hardcoded value.');
+    }
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       console.warn(`Login Failed: Invalid password for ${email}`);
