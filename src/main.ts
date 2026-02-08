@@ -9,6 +9,20 @@ async function bootstrap() {
   // Set global prefix
   app.setGlobalPrefix('api');
 
+  // Debug Logger Middleware
+  app.use((req, res, next) => {
+    console.log(`[INCOMING] ${req.method} ${req.originalUrl}`);
+    // Safe body logging
+    if (req.body && Object.keys(req.body).length > 0) {
+      // Avoid logging large payloads or sensitive data aggressively if not needed, 
+      // but for debugging login we need it. mask password.
+      const bodyLog = { ...req.body };
+      if (bodyLog.password) bodyLog.password = `[LEN=${bodyLog.password.length}]`;
+      console.log('[BODY]', JSON.stringify(bodyLog));
+    }
+    next();
+  });
+
   // Enable CORS for frontend (add your production URLs)
   app.enableCors({
     origin: [
