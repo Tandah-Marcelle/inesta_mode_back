@@ -86,6 +86,8 @@ export class AuthController {
         passwordHashPreview: user.password ? user.password.substring(0, 10) + '...' : 'NO_PASSWORD',
         doesMatchTempPassword: isMatch,
         isActive: user.isActive,
+        approvalStatus: user.approvalStatus,
+        isPending: user.approvalStatus === 'pending',
         failedLoginAttempts: user.failedLoginAttempts
       };
     } catch (error) {
